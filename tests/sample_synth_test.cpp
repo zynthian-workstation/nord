@@ -1,0 +1,64 @@
+#include "SampleSynthEngine.hpp"
+#include "Nsmp4Reader.hpp"
+#include <iostream>
+#include <vector>
+#include <stdexcept>
+#include <atomic>
+#include <cstdlib>
+static std::atomic<bool> watch{false};static std::atomic<unsigned> allocations{0};
+void* operator new(std::size_t n){if(watch)++allocations;if(void*p=std::malloc(n))return p;throw std::bad_alloc();}void operator delete(void*p)noexcept{std::free(p);}void operator delete(void*p,std::size_t)noexcept{std::free(p);}
+using namespace nord::synth;
+void ck(bool v,const char*s){if(!v)throw std::runtime_error(s);}
+std::shared_ptr<const Instrument> sine(){auto p=std::make_shared<Instrument>();auto s=std::make_shared<SampleData>();s->channels=1;s->sampleRate=44100;s->frames=44100;s->loop={true,0,44100};s->left.resize(s->frames);for(size_t i=0;i<s->frames;++i)s->left[i]=.1f*std::sin(2*3.141592653589793*220*i/44100);p->samples.push_back(s);Zone z;z.keyLow=0;z.keyHigh=127;p->zones.push_back(z);return p;}
+std::vector<float> sequence(const Instrument* raw,std::shared_ptr<const Instrument> p,const SynthParameters&param,unsigned block,double rate,const std::vector<MidiVoiceEvent>&events,unsigned frames,bool stereo=false){SampleSynthEngine engine;engine.prepare(rate,512);engine.prepareInstrument(std::move(p));engine.setParameters(param);std::vector<float> l(frames),r(frames);std::array<MidiVoiceEvent,512> batch{};
+ for(unsigned base=0;base<frames;base+=block){unsigned n=std::min(block,frames-base),count=0;for(auto e:events)if(e.sampleOffset>=base&&e.sampleOffset<base+n){e.sampleOffset-=base;batch[count++]=e;}RenderContext c{rate,n,batch.data(),count,l.data()+base,r.data()+base};watch=true;engine.render(c);watch=false;}ck(engine.midiOverflows()==0,"MIDI overflow");if(stereo)l.insert(l.end(),r.begin(),r.end());return l;}
+double energy(const std::vector<float>&a,size_t start,size_t count){double q=0;for(size_t i=start;i<std::min(a.size(),start+count);++i)q+=double(a[i])*a[i];return q/std::max(size_t(1),std::min(a.size()-std::min(start,a.size()),count));}
+double frequency(const std::vector<float>&a,size_t begin,size_t end,double rate=44100){std::vector<double> cross;for(size_t i=std::max(size_t(1),begin);i<std::min(end,a.size());++i)if(a[i-1]<0&&a[i]>=0)cross.push_back(i-a[i]/(a[i]-a[i-1]));ck(cross.size()>4,"frequency crossings");return (cross.size()-1)*rate/(cross.back()-cross.front());}
+int main(int argc,char**argv){try{
+ auto p=sine();SynthParameters neutral;std::vector<MidiVoiceEvent> events{{MidiVoiceEvent::Type::NoteOn,0,0,60,127,0},{MidiVoiceEvent::Type::NoteOff,5001,0,60,0,0}};
+ for(double rate:{44100.,48000.}){auto reference=sequence(p.get(),p,neutral,1,rate,events,20000);for(unsigned size:{7,15,16,17,31,64,127,512})ck(sequence(p.get(),p,neutral,size,rate,events,20000)==reference,"quantum partition mismatch");}
+ for(int a=1;a<argc;++a){auto real=Nsmp4Reader::read(argv[a]);for(double rate:{44100.,48000.}){const auto*z=real->zoneFor(60,127);ck(z,"real C4");const auto&s=*real->samples[z->sampleIndex];auto output=sequence(real.get(),real,neutral,127,rate,{{MidiVoiceEvent::Type::NoteOn,0,0,60,127,0}},44100,true);Nsmp4SamplePlayer player;player.start(&s);player.setRate(Nsmp4SamplePlayer::rate(s,*z,60,rate));double max=0;for(size_t i=0;i<44100;++i){float l,r;player.render(l,r);max=std::max({max,double(std::abs(output[i]-l*(z->gainLinear*real->playbackGain(60)))),double(std::abs(output[i+44100]-r*(z->gainLinear*real->playbackGain(60))))});}ck(max<=1e-6,"T2 real bypass identity");std::cout<<"T2 "<<argv[a]<<','<<rate<<",maxAbs="<<max<<'\n';}}
+ // Independent known gains: instrument and note multiply once, including velocity.
+ {auto scaled=std::make_shared<Instrument>(*sine());scaled->instrumentGain=2;scaled->keyGain[60]=.25f;
+  auto a=sequence(p.get(),p,neutral,127,44100,events,20000);auto b=sequence(scaled.get(),scaled,neutral,127,44100,events,20000);
+  for(size_t i=0;i<a.size();++i)ck(std::abs(b[i]-a[i]*.5f)<1e-7,"keyboard gain once/linear");
+  scaled->keyGain[60]=0;auto muted=sequence(scaled.get(),scaled,neutral,127,44100,events,20000);for(float x:muted)ck(x==0,"authored key mute");}
+ auto plain=sequence(p.get(),p,neutral,127,44100,events,20000);
+ auto q=neutral;q.set(amp_attack_ms,500);auto attack=sequence(p.get(),p,q,127,44100,events,20000);ck(energy(attack,1000,2000)<energy(plain,1000,2000)*.3,"attack control");
+ q=neutral;q.set(amp_release_ms,1000);auto release=sequence(p.get(),p,q,127,44100,events,60000);ck(energy(release,10000,2000)>1e-6&&energy(release,55000,2000)<1e-10,"release control");
+ auto pedalEvents=events;pedalEvents.insert(pedalEvents.begin()+1,{MidiVoiceEvent::Type::Sustain,4000,0,64,127,0});pedalEvents.push_back({MidiVoiceEvent::Type::Sustain,30000,0,64,0,0});auto pedal=sequence(p.get(),p,neutral,31,44100,pedalEvents,44100);ck(energy(pedal,15000,2000)>1e-4&&energy(pedal,40000,2000)==0,"CC64 gate release");
+ for(auto type:{MidiVoiceEvent::Type::ChannelPressure,MidiVoiceEvent::Type::PolyPressure}){auto ev=events;ev.insert(ev.begin()+1,{type,1025,0,60,127,0});ck(sequence(p.get(),p,neutral,127,44100,ev,20000)==plain,"unrouted CC changed audio");}
+ for(int mode:{1,2,3}){q=neutral;q.set(filter_mode,mode);q.set(cutoff_hz,mode==2?3000:80);auto filtered=sequence(p.get(),p,q,127,44100,events,20000);ck(energy(filtered,1000,2000)<energy(plain,1000,2000)*.3,"Fast SVF spectral effect");}
+ for(int n:{1,2,3,4}){q=neutral;q.set(unison_voices,n);auto uni=sequence(p.get(),p,q,127,44100,events,20000);double ratio=energy(uni,1000,2000)/energy(plain,1000,2000);ck(std::abs(ratio-n)<.001,"unison 1/sqrtN coherent power");}
+ {auto ev=events;ev.insert(ev.begin()+1,{MidiVoiceEvent::Type::CC1,1025,0,1,127,0});ck(sequence(p.get(),p,neutral,127,44100,ev,20000)!=plain,"default wheel vibrato missing");}
+ q=neutral;q.set(mod_01_source,7);q.set(mod_01_target,1);q.set(mod_01_depth,.05);auto cc=events;cc.insert(cc.begin()+1,{MidiVoiceEvent::Type::CC1,1025,0,1,127,0});ck(sequence(p.get(),p,q,127,44100,cc,20000)!=plain,"routed wheel has no effect");
+ {SampleSynthEngine e;e.prepareInstrument(p);q=neutral;q.set(polyphony,4);e.setParameters(q);MidiVoiceEvent notes[10];for(int i=0;i<10;++i)notes[i]={MidiVoiceEvent::Type::NoteOn,0,0,uint8_t(50+i),127,0};float l[16],r[16];RenderContext c{44100,16,notes,10,l,r};watch=true;e.render(c);watch=false;ck(e.activeVoices()==4,"physical voice bound");MidiVoiceEvent off{MidiVoiceEvent::Type::AllSoundOff,0,0,0,0,0};c.events=&off;c.eventCount=1;e.render(c);ck(e.activeVoices()==0,"CC120");}
+
+ // Pitch bend is applied exactly once; tuning and smooth glide affect read ratio.
+ const std::vector<MidiVoiceEvent> held{{MidiVoiceEvent::Type::NoteOn,0,0,60,127,0}};
+ for(auto pair:{std::pair<int,float>{coarse_semitones,12},{fine_cents,100}}){q=neutral;q.set(pair.first,pair.second);auto tuned=sequence(p.get(),p,q,127,44100,held,44100);double expected=220*std::exp2((pair.first==fine_cents?pair.second/100:pair.second)/12);ck(std::abs(1200*std::log2(frequency(tuned,10000,40000)/expected))<.5,"coarse/fine pitch");}
+ for(int bendValue:{-8192,8191}){auto bentEvents=held;bentEvents.push_back({MidiVoiceEvent::Type::Bend,1000,0,0,0,int16_t(bendValue)});auto bent=sequence(p.get(),p,neutral,127,44100,bentEvents,44100);double expected=220*std::exp2(2*(bendValue/8192.)/12);ck(std::abs(1200*std::log2(frequency(bent,10000,40000)/expected))<.5,"bend +/-2");}
+ // A cross-zone legato keeps the old sample. Mono retriggers the destination sample.
+ auto two=std::make_shared<Instrument>(*p);two->zones[0].keyHigh=65;auto second=std::make_shared<SampleData>(*p->samples[0]);for(size_t i=0;i<second->frames;++i)second->left[i]=.1f*std::sin(2*3.141592653589793*800*i/44100);two->samples.push_back(second);Zone other;other.keyLow=66;other.rootKey=72;other.sampleIndex=1;two->zones.push_back(other);
+ std::vector<MidiVoiceEvent> legatoEvents{{MidiVoiceEvent::Type::NoteOn,0,0,60,127,0},{MidiVoiceEvent::Type::NoteOn,10000,0,72,127,0},{MidiVoiceEvent::Type::NoteOff,20000,0,72,0,0},{MidiVoiceEvent::Type::NoteOff,30000,0,60,0,0}};
+ for(int mode:{1,2}){q=neutral;q.set(voice_mode,mode);auto mono=sequence(two.get(),two,q,127,44100,legatoEvents,44100);double expected=mode==1?800:440;ck(std::abs(frequency(mono,12000,19000)-expected)<.1,"Mono/Legato zone policy");ck(std::abs(frequency(mono,22000,29000)-220)<.1,"last held note priority");}
+ q=neutral;q.set(voice_mode,2);q.set(glide_mode,1);q.set(glide_ms,500);auto glideEvents=legatoEvents;glideEvents.resize(2);auto gliding=sequence(two.get(),two,q,127,44100,glideEvents,44100);ck(frequency(gliding,11000,14000)<frequency(gliding,35000,40000)*.8,"glide continuous pitch");
+ // LFOs without routes are neutral; connected LFO/Filter EG alter audio.
+ q=neutral;q.set(lfo1_depth,1);q.set(lfo2_depth,1);ck(sequence(p.get(),p,q,127,44100,events,20000)==plain,"LFO without routes");
+ q.set(mod_01_source,1);q.set(mod_01_target,1);q.set(mod_01_depth,.01);auto vibrato=sequence(p.get(),p,q,127,44100,held,88200);ck(std::abs(frequency(vibrato,10000,80000)-220)<1,"vibrato central pitch");ck(vibrato!=sequence(p.get(),p,neutral,127,44100,held,88200),"LFO1 pitch inactive");
+ q=neutral;q.set(filter_mode,1);q.set(cutoff_hz,800);auto noEg=sequence(p.get(),p,q,127,44100,held,44100);q.set(feg_attack_ms,500);q.set(feg_sustain,1);q.set(feg_depth_semitones,24);ck(sequence(p.get(),p,q,127,44100,held,44100)!=noEg,"Filter EG depth");q.set(feg_depth_semitones,0);ck(sequence(p.get(),p,q,127,44100,held,44100)==noEg,"Filter EG depth0 bypass");q.set(lfo2_depth,1);q.set(mod_01_source,2);q.set(mod_01_target,2);q.set(mod_01_depth,.5);ck(sequence(p.get(),p,q,127,44100,held,44100)!=noEg,"LFO2 cutoff");
+ q=neutral;q.set(mod_01_source,9);q.set(mod_01_target,1);q.set(mod_01_depth,.05);auto unrelated=held;unrelated.push_back({MidiVoiceEvent::Type::PolyPressure,1000,0,64,127,0});ck(sequence(p.get(),p,q,127,44100,unrelated,44100)==sequence(p.get(),p,q,127,44100,held,44100),"poly pressure leaked to other note");
+ q=neutral;q.set(voice_mode,1);auto duplicate=events;duplicate.insert(duplicate.begin()+1,{MidiVoiceEvent::Type::NoteOn,128,0,60,127,0});duplicate.push_back({MidiVoiceEvent::Type::NoteOff,8000,0,60,0,0});auto retrigger=sequence(p.get(),p,q,127,44100,duplicate,20000);ck(energy(retrigger,6000,1000)>1e-4&&energy(retrigger,15000,1000)==0,"duplicate mono NoteOff");
+
+ {q=neutral;q.set(unison_voices,4);q.set(unison_detune_cents,8);q.set(unison_spread,1);auto stereo=sequence(p.get(),p,q,127,44100,held,44100,true);double width=0;for(size_t i=0;i<44100;++i)width+=std::pow(double(stereo[i]-stereo[44100+i]),2);ck(width/44100>1e-5,"unison detune/spread stereo effect");}
+ // Quantify the requested 5 Hz vibrato from consecutive instantaneous periods.
+ {std::vector<double> crossings,up;for(size_t i=1;i<vibrato.size();++i)if(vibrato[i-1]<0&&vibrato[i]>=0)crossings.push_back(i-vibrato[i]/(vibrato[i]-vibrato[i-1]));double previous=0;for(size_t i=1;i<crossings.size();++i){double f=44100/(crossings[i]-crossings[i-1]);if(previous<220&&f>=220&&crossings[i]>4410)up.push_back(crossings[i]/44100);previous=f;}ck(up.size()>4,"vibrato cycles");double rate=(up.size()-1)/(up.back()-up.front());ck(std::abs(rate-5)<.1,"vibrato frequency mismatch");std::cout<<"T4 vibrato measured_hz="<<rate<<'\n';}
+ // Key trigger is independent of engine time; Free uses its continuously running phase.
+ for(int trigger:{0,1}){q=neutral;q.set(lfo1_depth,1);q.set(lfo1_trigger,trigger);q.set(mod_01_source,1);q.set(mod_01_target,1);q.set(mod_01_depth,.1);
+ auto first=sequence(p.get(),p,q,127,44100,held,20000);constexpr unsigned start=16320;auto late=sequence(p.get(),p,q,127,44100,{{MidiVoiceEvent::Type::NoteOn,start,0,60,127,0}},start+20000);bool equal=std::equal(first.begin()+1000,first.begin()+10000,late.begin()+start+1000);ck(equal==(trigger==0),"KeyTrig/Free phase clock");}
+ // Dense unison retriggers must retain every new copy while stealing old attacks.
+ {SampleSynthEngine e;e.prepareInstrument(p);q=neutral;q.set(polyphony,1);q.set(unison_voices,4);q.set(amp_attack_ms,500);e.setParameters(q);float l[16],r[16];MidiVoiceEvent on{MidiVoiceEvent::Type::NoteOn,0,0,60,100,0};e.render({44100,16,&on,1,l,r});on.note=64;e.render({44100,16,&on,1,l,r});ck(e.activeVoices()==4,"unison stole its own new copies");}
+ // Overflow is bounded and counted, including irregular host offsets.
+ {ScxtBlockAdapter block;block.prepare(512);std::vector<MidiVoiceEvent> many(9000);for(auto&e:many){e.type=MidiVoiceEvent::Type::AllSoundOff;e.sampleOffset=1;}float l[16],r[16];watch=true;block.render({44100,16,many.data(),uint32_t(many.size()),l,r},[](auto){},[](float*l,float*r,uint64_t){std::fill_n(l,16,0);std::fill_n(r,16,0);});watch=false;ck(block.overflows()==808,"bounded MIDI overflow counter");}
+ ck(allocations==0,"allocation in audio callback");std::cout<<"T2/T4/T5 bypass, MIDI, 9 partitions, controls and no audio new: PASS\n";
+}catch(const std::exception&e){watch=false;std::cerr<<e.what()<<"; allocations="<<allocations<<'\n';return 1;}}

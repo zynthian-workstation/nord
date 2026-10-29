@@ -1,0 +1,9 @@
+/build*/
+/dist/
+__pycache__/
+*.pyc
+*.wav
+*.tar.gz
+/instruments/
+*.[nN][pP][nN][oO]
+*.[nN][sS][mM][pP]4

@@ -1,0 +1,94 @@
+name: Nord ARM64 Release
+
+on:
+  push:
+    tags: ['[0-9]*.[0-9]*.[0-9]*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nord-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3
+    timeout-minutes: 30
+    steps:
+      - name: Install Bookworm build and validation dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential cmake pkg-config python3 ca-certificates git binutils file libcairo2-dev libx11-dev libxext-dev python3-numpy liblilv-0-0 python3-rdflib
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Validate manifest and release tag
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$EVENT_NAME" = push ]; then
+            python3 -B ci/validate.py manifest --tag "$REF_NAME"
+          else
+            python3 -B ci/validate.py manifest
+          fi
+      - name: Configure and fetch locked dependencies
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Compile Release
+        run: cmake --build build --parallel 2
+      - name: Run product regression tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Validate LV2, AArch64 ELF and shared libraries
+        run: python3 -B ci/validate.py bundle --bundle build/bin/Nord.lv2 --architecture aarch64
+      - name: Package binary and corresponding sources
+        run: |
+          cmake --build build --target package
+          cmake --build build --target package_source
+          mkdir -p dist
+          python3 - <<'PY'
+          import hashlib,json,pathlib,shutil
+          root=pathlib.Path('.');m=json.loads((root/'workstation.json').read_text());version=m['version']
+          names=[m['platforms'][0]['asset'].format(version=version),f'Nord-LV2-{version}-source.tar.gz']
+          for name in names:
+              target=root/'dist'/name;shutil.copy2(root/'build'/name,target)
+              (root/'dist'/(name+'.sha256')).write_text(hashlib.sha256(target.read_bytes()).hexdigest()+'  '+name+'\n')
+          shutil.copy2('workstation.json','dist/workstation.json')
+          PY
+          mkdir -p build/package-check
+          tar -xzf "dist/$(python3 -c 'import json; m=json.load(open("workstation.json")); print(m["platforms"][0]["asset"].format(version=m["version"]))')" -C build/package-check
+          python3 -B ci/validate.py bundle --bundle build/package-check/Nord.lv2 --architecture aarch64
+      - name: Preserve validation artifacts (manual runs never publish)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: nord-release-candidate
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: nord-release-candidate
+          path: dist
+      - name: Publish validated tag only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import json,os,pathlib,re
+          m=json.loads(pathlib.Path('dist/workstation.json').read_text())
+          assert os.environ['RELEASE_TAG']==m['version']
+          PY
+          (cd dist && sha256sum --check ./*.sha256)
+          gh release create "$RELEASE_TAG" dist/* --verify-tag --title "Nord LV2 $RELEASE_TAG" --generate-notes

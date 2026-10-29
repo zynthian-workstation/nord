@@ -1,0 +1,100 @@
+{
+  "schema_version": 2,
+  "components": [
+    {
+      "name": "DPF",
+      "url": "https://github.com/DISTRHO/DPF",
+      "commit": "4238e1c7f0351bbe488d79f0899c540543ac7583",
+      "archive_url": "https://codeload.github.com/DISTRHO/DPF/tar.gz/4238e1c7f0351bbe488d79f0899c540543ac7583",
+      "archive_sha256": "8ed5d8e82c00575eca362d022858cd5d30883eccab9deac0b07bb481ca80088f",
+      "license": "ISC",
+      "cmake_name": "dpf"
+    },
+    {
+      "name": "Pugl",
+      "url": "https://github.com/DISTRHO/pugl",
+      "commit": "5e2621d714ddf1cb0f86e852f8ba5dffe04aa3a3",
+      "archive_url": "https://codeload.github.com/DISTRHO/pugl/tar.gz/5e2621d714ddf1cb0f86e852f8ba5dffe04aa3a3",
+      "archive_sha256": "d4798e71e9da566ca6e22f47102e70595902313611ae6ca8c006a18a60e97bfc",
+      "license": "ISC / 0BSD / MIT",
+      "cmake_name": "pugl"
+    },
+    {
+      "name": "sst-basic-blocks",
+      "url": "https://github.com/surge-synthesizer/sst-basic-blocks",
+      "commit": "9cee7635944757a2bb3d80a92a1e2e0399e834d6",
+      "archive_url": "https://codeload.github.com/surge-synthesizer/sst-basic-blocks/tar.gz/9cee7635944757a2bb3d80a92a1e2e0399e834d6",
+      "archive_sha256": "49b55b59a92808e159583cfdafd582b8a5d2e099f79f2ce5c3377de25b37f2f5",
+      "license": "GPL-3.0-or-later",
+      "cmake_name": "sst_basic_blocks"
+    },
+    {
+      "name": "sst-cpputils",
+      "url": "https://github.com/surge-synthesizer/sst-cpputils",
+      "commit": "67601c8d3cc7405569229b9618da55b6420633d7",
+      "archive_url": "https://codeload.github.com/surge-synthesizer/sst-cpputils/tar.gz/67601c8d3cc7405569229b9618da55b6420633d7",
+      "archive_sha256": "b95c95de6dcb25c5faaa9fc9270ebaea2b0adee9d403021ba06f4dac8f79df85",
+      "license": "MIT",
+      "cmake_name": "sst_cpputils"
+    },
+    {
+      "name": "sst-filters",
+      "url": "https://github.com/surge-synthesizer/sst-filters",
+      "commit": "87a171bcba52c014850848a29174a54f0adc6606",
+      "archive_url": "https://codeload.github.com/surge-synthesizer/sst-filters/tar.gz/87a171bcba52c014850848a29174a54f0adc6606",
+      "archive_sha256": "98263744fc794dccc68f39df9b3906e922a96d8d7da8ee97202197f94c5b2345",
+      "license": "GPL-3.0-or-later",
+      "cmake_name": "sst_filters"
+    },
+    {
+      "name": "sst-waveshapers",
+      "url": "https://github.com/surge-synthesizer/sst-waveshapers",
+      "commit": "dd12f31a5a9016c9895e52d1a00eee0e1eebe6ce",
+      "archive_url": "https://codeload.github.com/surge-synthesizer/sst-waveshapers/tar.gz/dd12f31a5a9016c9895e52d1a00eee0e1eebe6ce",
+      "archive_sha256": "725d16ae50ef9fabf293ba09ecf854ababf88bd5389737fbc8421e345798289f",
+      "license": "GPL-3.0-or-later",
+      "cmake_name": "sst_waveshapers"
+    },
+    {
+      "name": "SIMDe",
+      "url": "https://github.com/simd-everywhere/simde",
+      "commit": "71fd833d9666141edcd1d3c109a80e228303d8d7",
+      "archive_url": "https://codeload.github.com/simd-everywhere/simde/tar.gz/71fd833d9666141edcd1d3c109a80e228303d8d7",
+      "archive_sha256": "72b2c14a487560b7eb203795f2c2fead5c7499662e639944cca2a9bb19f09029",
+      "license": "MIT; selected support headers CC0-1.0",
+      "cmake_name": "simde"
+    }
+  ],
+  "source_ports": [
+    {
+      "name": "Shortcircuit XT curves",
+      "url": "https://github.com/surge-synthesizer/shortcircuit-xt",
+      "commit": "72ad42336a8cbc2d5f74fecc303c1a48a1a5a426",
+      "license": "MIT",
+      "scope": "existing source port; no SCXT application"
+    },
+    {
+      "name": "nord-format",
+      "url": "https://crates.io/crates/nord-format/0.8.0",
+      "version": "0.8.0",
+      "archive_sha256": "0fc8c1f1c031e250af5db6a774796f7484f4e139b9756198e9b6eb07e3f03397",
+      "license": "BSD-3-Clause",
+      "scope": "license for existing C++ NSMP4 port; no Rust toolchain"
+    },
+    {
+      "name": "Surge XT",
+      "url": "https://github.com/surge-synthesizer/surge",
+      "license": "GPL-3.0-or-later",
+      "scope": "license for existing SurgeModernDpw.hpp source port; no reference engine",
+      "reference_sha256": {
+        "ModernOscillator.h": "65827edb820e6b7404bb598fabc616f7a7caaa15eb6d13c9644426d991c9ddab",
+        "SurgeStorage.h": "ae30e0571bffc48324a603392d064ea0d4732ae5f4185c000a216027aabbbe81",
+        "SineOscillator.cpp": "c2860449988f9e9ddab03e7cd98d6e9b0b154ec2fae4d81dd301c23e8168a830",
+        "LICENSE": "d4c0fe570b3750d909691ce5f494c9cd11ee047bbbedda9a5d75cc548e4df06b",
+        "SurgeVoice.cpp": "c92d392a0540d83a320c1c4f1645f983bcc6311d5895ea06a3820e465311dd4d",
+        "SOURCE_LOCK.json": "3db514543747f0091fe1fad1293ed3f619db8c7ff659159e8aefcd02eba23de3",
+        "ModernOscillator.cpp": "86831773b7acfa2f6c78105370a01797914192d344480a51f72eeb05dd88be11"
+      }
+    }
+  ]
+}

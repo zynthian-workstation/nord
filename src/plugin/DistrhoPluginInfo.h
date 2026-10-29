@@ -1,0 +1,18 @@
+#pragma once
+#define DISTRHO_PLUGIN_NAME "Nord"
+#define DISTRHO_PLUGIN_DESCRIPTION "Uma releitura dos timbres do Nord, usando o Nord Stage 4 como inspiração"
+#define DISTRHO_PLUGIN_URI "urn:nord:instrument"
+#define DISTRHO_PLUGIN_NUM_INPUTS 0
+#define DISTRHO_PLUGIN_NUM_OUTPUTS 2
+#define DISTRHO_PLUGIN_IS_SYNTH 1
+#define DISTRHO_PLUGIN_HAS_UI 1
+#define DISTRHO_PLUGIN_WANT_MIDI_INPUT 1
+#define DISTRHO_PLUGIN_IS_RT_SAFE 1
+
+#define DISTRHO_PLUGIN_WANT_STATE 1
+#define DISTRHO_PLUGIN_WANT_FULL_STATE 1
+
+#define DISTRHO_UI_DEFAULT_WIDTH 820
+#define DISTRHO_UI_DEFAULT_HEIGHT 710
+
+#define DISTRHO_UI_USE_CAIRO 1

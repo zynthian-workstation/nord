@@ -1,0 +1,10 @@
+{
+  "commit": "37b776a126f48c2e214f016b081f1554513cbc24",
+  "source": "Read-only SSH extraction from installed Pi; https://github.com/zynthian/zynthian-ui",
+  "files": {
+    "processor.py.txt": "8e52b50ca77b245767819083cc631360e0da2bf30c736064e2a99b766c01cf8d",
+    "controller.py.txt": "8c5f61631b3a72e478f67387199971ea119a279ff8f3d2694bcb5c8779cf2485",
+    "jalv.py.txt": "b005c095036e47b23e50432553044e7f04e7e511d9f555a2c74c042a7cfd4ade",
+    "control.py.txt": "be9673e06d065813626233b10579ec5331647c4b75469c4c5a005c7de8dd81b1"
+  }
+}

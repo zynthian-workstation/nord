@@ -1,0 +1,7 @@
+{
+  "URL": "urn:nord:instrument",
+  "NAME": "Nord",
+  "TYPE": "MIDI Synth",
+  "CAT": "Workstation",
+  "DESCR": "Uma releitura dos timbres do Nord, usando o Nord Stage 4 como inspiração"
+}
