@@ -1,0 +1,9 @@
+{
+  "commit": "11d4e858367db465a431c701d9035432742a5a7d",
+  "source": "https://github.com/zynthian/zynthian-ui/tree/11d4e858367db465a431c701d9035432742a5a7d",
+  "files": {
+    "processor.py.txt": "8e52b50ca77b245767819083cc631360e0da2bf30c736064e2a99b766c01cf8d",
+    "jalv.py.txt": "b005c095036e47b23e50432553044e7f04e7e511d9f555a2c74c042a7cfd4ade",
+    "control.py.txt": "be9673e06d065813626233b10579ec5331647c4b75469c4c5a005c7de8dd81b1"
+  }
+}

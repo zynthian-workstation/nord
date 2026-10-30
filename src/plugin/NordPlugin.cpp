@@ -48,7 +48,7 @@ protected:
  const char* getLabel() const override{return DISTRHO_PLUGIN_NAME;}
  const char* getMaker() const override{return "Nord Project";}
  const char* getLicense() const override{return "GPL-3.0-or-later";}
- uint32_t getVersion() const override{return d_version(1,0,0);}
+ uint32_t getVersion() const override{return d_version(1,0,1);}
  int64_t getUniqueId() const override{return d_cconst('N','O','R','D');}
  void initParameter(uint32_t index,Parameter& p) override {
   const auto& d=nord::NordControls::definitions()[index].parameter;

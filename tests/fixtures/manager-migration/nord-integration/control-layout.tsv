@@ -1,0 +1,125 @@
+7	0	General	0	gain	0	1	0.300000012
+7	0	General	1	transpose	-24	24	0
+6	0	General	2	pitch_bend_up	0	24	2
+6	0	General	3	pitch_bend_down	-24	0	-2
+1	1	Piano	4	kb_touch	0	3	0
+1	1	Piano	5	soft_release	0	1	0
+1	1	Piano	6	piano_timbre	0	2	0
+4	2	OSC 1	7	pure_osc1_waveform	0	6	2
+4	2	OSC 1	8	pure_osc1_octave	-2	2	0
+4	2	OSC 1	9	pure_osc1_semitone	-12	12	0
+4	2	OSC 1	10	pure_osc1_detune_cents	-100	100	0
+4	3	OSC 2	11	pure_osc2_enabled	0	1	0
+4	3	OSC 2	12	pure_osc2_waveform	0	6	2
+4	3	OSC 2	13	pure_osc2_octave	-2	2	0
+4	3	OSC 2	14	pure_osc2_semitone	-12	12	0
+4	4	Mixer	15	pure_osc1_level	0	1	1
+4	4	Mixer	16	pure_osc2_level	0	1	1
+4	4	Mixer	17	pure_osc2_detune_cents	-100	100	7
+6	5	Pitch	18	synth_fine_cents	-100	100	0
+6	6	Filter	19	synth_filter_mode	0	3	0
+6	6	Filter	20	synth_cutoff_hz	20	20000	20000
+6	6	Filter	21	synth_resonance	0	1	0
+6	6	Filter	22	stage_drive	0	1	0
+6	7	Filter color	23	synth_keytrack	0	3	0
+6	7	Filter color	24	stage_bright	0	1	0
+6	8	Filter EG	25	synth_feg_attack_ms	0	30000	0
+6	8	Filter EG	26	synth_feg_decay_ms	0	30000	0
+6	8	Filter EG	27	synth_feg_sustain	0	1	0
+6	8	Filter EG	28	synth_feg_release_ms	0	30000	0
+6	9	Filter EG amt	29	synth_feg_depth_semitones	-60	60	0
+6	9	Filter EG amt	30	stage_feg_velocity	0	1	0
+6	10	Amplifier	31	synth_velocity_gain_depth	0	1	1
+6	11	Amp EG	32	synth_amp_attack_ms	0	30000	0
+6	11	Amp EG	33	synth_amp_decay_ms	0	30000	0
+6	11	Amp EG	34	synth_amp_sustain	0	1	1
+6	11	Amp EG	35	synth_amp_release_ms	0	30000	5
+6	12	LFO 1	36	synth_lfo1_rate_hz	0.0199999996	40	5
+6	12	LFO 1	37	synth_lfo1_wave	0	5	0
+6	12	LFO 1	38	synth_lfo1_depth	0	1	0
+6	12	LFO 1	39	synth_lfo1_trigger	0	1	0
+6	13	LFO 1 phase	40	synth_lfo1_phase	0	1	0
+6	14	LFO 2	41	synth_lfo2_rate_hz	0.0199999996	40	5.5
+6	14	LFO 2	42	synth_lfo2_wave	0	5	0
+6	14	LFO 2	43	synth_lfo2_depth	0	1	1
+6	14	LFO 2	44	synth_lfo2_trigger	0	1	0
+6	15	LFO 2 phase	45	synth_lfo2_phase	0	1	0
+6	16	Mod 01	46	synth_mod_01_source	0	9	0
+6	16	Mod 01	47	synth_mod_01_target	0	7	0
+6	16	Mod 01	48	synth_mod_01_via	0	3	0
+6	16	Mod 01	49	synth_mod_01_depth	-1	1	0
+6	17	Mod 02	50	synth_mod_02_source	0	9	0
+6	17	Mod 02	51	synth_mod_02_target	0	7	0
+6	17	Mod 02	52	synth_mod_02_via	0	3	0
+6	17	Mod 02	53	synth_mod_02_depth	-1	1	0
+6	18	Mod 03	54	synth_mod_03_source	0	9	0
+6	18	Mod 03	55	synth_mod_03_target	0	7	0
+6	18	Mod 03	56	synth_mod_03_via	0	3	0
+6	18	Mod 03	57	synth_mod_03_depth	-1	1	0
+6	19	Mod 04	58	synth_mod_04_source	0	9	0
+6	19	Mod 04	59	synth_mod_04_target	0	7	0
+6	19	Mod 04	60	synth_mod_04_via	0	3	0
+6	19	Mod 04	61	synth_mod_04_depth	-1	1	0
+6	20	Mod 05	62	synth_mod_05_source	0	9	0
+6	20	Mod 05	63	synth_mod_05_target	0	7	0
+6	20	Mod 05	64	synth_mod_05_via	0	3	0
+6	20	Mod 05	65	synth_mod_05_depth	-1	1	0
+6	21	Mod 06	66	synth_mod_06_source	0	9	0
+6	21	Mod 06	67	synth_mod_06_target	0	7	0
+6	21	Mod 06	68	synth_mod_06_via	0	3	0
+6	21	Mod 06	69	synth_mod_06_depth	-1	1	0
+6	22	Mod 07	70	synth_mod_07_source	0	9	0
+6	22	Mod 07	71	synth_mod_07_target	0	7	0
+6	22	Mod 07	72	synth_mod_07_via	0	3	0
+6	22	Mod 07	73	synth_mod_07_depth	-1	1	0
+6	23	Mod 08	74	synth_mod_08_source	0	9	0
+6	23	Mod 08	75	synth_mod_08_target	0	7	0
+6	23	Mod 08	76	synth_mod_08_via	0	3	0
+6	23	Mod 08	77	synth_mod_08_depth	-1	1	0
+6	24	Mod 09	78	synth_mod_09_source	0	9	0
+6	24	Mod 09	79	synth_mod_09_target	0	7	0
+6	24	Mod 09	80	synth_mod_09_via	0	3	0
+6	24	Mod 09	81	synth_mod_09_depth	-1	1	0
+6	25	Mod 10	82	synth_mod_10_source	0	9	0
+6	25	Mod 10	83	synth_mod_10_target	0	7	0
+6	25	Mod 10	84	synth_mod_10_via	0	3	0
+6	25	Mod 10	85	synth_mod_10_depth	-1	1	0
+6	26	Mod 11	86	synth_mod_11_source	0	9	0
+6	26	Mod 11	87	synth_mod_11_target	0	7	0
+6	26	Mod 11	88	synth_mod_11_via	0	3	0
+6	26	Mod 11	89	synth_mod_11_depth	-1	1	0
+6	27	Mod 12	90	synth_mod_12_source	0	9	0
+6	27	Mod 12	91	synth_mod_12_target	0	7	0
+6	27	Mod 12	92	synth_mod_12_via	0	3	0
+6	27	Mod 12	93	synth_mod_12_depth	-1	1	0
+6	28	Mod 13	94	synth_mod_13_source	0	9	0
+6	28	Mod 13	95	synth_mod_13_target	0	7	0
+6	28	Mod 13	96	synth_mod_13_via	0	3	0
+6	28	Mod 13	97	synth_mod_13_depth	-1	1	0
+6	29	Mod 14	98	synth_mod_14_source	0	9	0
+6	29	Mod 14	99	synth_mod_14_target	0	7	0
+6	29	Mod 14	100	synth_mod_14_via	0	3	0
+6	29	Mod 14	101	synth_mod_14_depth	-1	1	0
+6	30	Mod 15	102	synth_mod_15_source	0	9	0
+6	30	Mod 15	103	synth_mod_15_target	0	7	0
+6	30	Mod 15	104	synth_mod_15_via	0	3	0
+6	30	Mod 15	105	synth_mod_15_depth	-1	1	0
+6	31	Mod 16	106	synth_mod_16_source	0	9	0
+6	31	Mod 16	107	synth_mod_16_target	0	7	0
+6	31	Mod 16	108	synth_mod_16_via	0	3	0
+6	31	Mod 16	109	synth_mod_16_depth	-1	1	0
+6	32	Mod 17	110	synth_mod_17_source	0	9	0
+6	32	Mod 17	111	synth_mod_17_target	0	7	0
+6	32	Mod 17	112	synth_mod_17_via	0	3	0
+6	32	Mod 17	113	synth_mod_17_depth	-1	1	0
+6	33	Mod 18	114	synth_mod_18_source	0	9	0
+6	33	Mod 18	115	synth_mod_18_target	0	7	0
+6	33	Mod 18	116	synth_mod_18_via	0	3	0
+6	33	Mod 18	117	synth_mod_18_depth	-1	1	0
+6	34	Voice	118	synth_voice_mode	0	2	0
+6	34	Voice	119	synth_polyphony	1	64	32
+6	34	Voice	120	synth_unison_voices	1	4	1
+6	34	Voice	121	synth_unison_detune_cents	0	50	0
+6	35	Performance	122	synth_unison_spread	0	1	0
+6	35	Performance	123	synth_glide_ms	0	2000	0
+6	35	Performance	124	synth_glide_mode	0	2	0

@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "id": "nord",
+  "name": "Nord",
+  "version": "1.0.0",
+  "description": "Uma releitura dos timbres do Nord, usando o Nord Stage 4 como inspiração",
+  "repository": "zynthian-workstation/nord",
+  "type": "lv2",
+  "category": "Workstation",
+  "plugin": {
+    "uri": "urn:nord:instrument",
+    "bundle": "Nord.lv2",
+    "install_path": "/zynthian/zynthian-plugins/lv2/Nord.lv2"
+  },
+  "platforms": [
+    {
+      "os": "linux",
+      "architecture": "aarch64",
+      "target": "zynthian-oram",
+      "asset": "Nord-LV2-{version}-linux-aarch64.tar.gz"
+    }
+  ],
+  "instruments": {
+    "base_path": "/zynthian/zynthian-my-data/soundfonts/nord",
+    "directories": [
+      "Accordion",
+      "Bass",
+      "Brass",
+      "Digital Piano",
+      "E Grand Piano",
+      "Grand Piano",
+      "Guitar_Plucked",
+      "Organ",
+      "Orquestral",
+      "Percussion Tuned",
+      "Strings",
+      "Synth",
+      "Synth Bass",
+      "Synth Lead",
+      "Synth Pad",
+      "Upright Piano",
+      "Voices_Choir",
+      "Woodwind"
+    ],
+    "formats": [
+      "npno",
+      "nsmp4"
+    ]
+  },
+  "integration": {
+    "host": "zynthian-oram",
+    "required": true,
+    "components": [
+      "engine-registration",
+      "dynamic-parameter-pages"
+    ]
+  }
+}

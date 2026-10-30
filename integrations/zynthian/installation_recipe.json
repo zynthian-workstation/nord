@@ -1,0 +1,11 @@
+{
+  "source": "zynthian-workstation/nord",
+  "modules": {
+    "nord_host.py": "309932a121ee553e0487d6842d5086e4d6af8d96e9e75b383ffbe3f335a8d291",
+    "nord_pages.py": "b514c1398d3da9452f01aa11fd964bf78188d8e69905ab275ed10b3f3235dee0"
+  },
+  "legacy_manager_modules": {
+    "nord_host.py": "8ad74c3807050b67fe323a44441d64e7cfcf72fefb6964b245e70efda4cc01d9",
+    "nord_pages.py": "09ac629669f716cb166e89f2e77a9349889a21cf4a3150147ebf877b1f2468a0"
+  }
+}

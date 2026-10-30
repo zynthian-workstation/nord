@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "nord",
   "name": "Nord",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Uma releitura dos timbres do Nord, usando o Nord Stage 4 como inspiração",
   "repository": "zynthian-workstation/nord",
   "type": "lv2",
@@ -53,6 +53,45 @@
     "components": [
       "engine-registration",
       "dynamic-parameter-pages"
+    ]
+  },
+  "preInstall": {
+    "command": [
+      "python3",
+      "-B",
+      "tools/install_zynthian.py",
+      "pre"
+    ],
+    "timeout": 120
+  },
+  "postInstall": {
+    "command": [
+      "python3",
+      "-B",
+      "tools/install_zynthian.py",
+      "post"
+    ],
+    "timeout": 120
+  },
+  "uninstall": {
+    "repository": "zynthian-workstation/nord",
+    "plugin_uri": "urn:nord:instrument",
+    "bundle": "Nord.lv2",
+    "privateDirectories": [
+      "soundfonts/nord",
+      "nord-lv2"
+    ],
+    "presetBundles": [
+      "Nord.presets.lv2"
+    ],
+    "presetMarkers": {
+      ".nord-managed": "Nord managed bundle\n",
+      ".nord-deploy-owned": "urn:nord:instrument\n",
+      ".nord-package.stamp": "",
+      ".nord-refresh.lock": ""
+    },
+    "presetCopies": [
+      "catalog.nord"
     ]
   }
 }

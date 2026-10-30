@@ -1,0 +1,1090 @@
+import io
+import json
+import tarfile
+import types
+from dataclasses import asdict
+from pathlib import Path
+from unittest.mock import Mock
+
+import pytest
+
+from workstation_manager.domain.installation import parse_manifest
+from workstation_manager.infrastructure.installation import installation_source
+
+
+@pytest.fixture
+def remote():
+    namespace = {"__name__": "remote_install_test"}
+    source = installation_source({}, "", "").split("\nlock_fd =")[0]
+    exec(compile(source, "<install>", "exec"), namespace)
+    return namespace
+
+
+@pytest.fixture
+def transaction(tmp_path, remote, install_manifest_data, monkeypatch):
+    root = tmp_path / "zynthian"
+    for name in (
+        "config",
+        "zynthian-sys/config",
+        "zynthian-ui/zyngine",
+        "zynthian-plugins/lv2",
+        "zynthian-my-data/soundfonts/test/Piano",
+    ):
+        (root / name).mkdir(parents=True, exist_ok=True)
+    source = root / "zynthian-ui/zyngine/zynthian_lv2.py"
+    source.write_text(Path("tests/fixtures/engines/oram.txt").read_text())
+    original_registry = {
+        "OTHER": {
+            "URL": "urn:other",
+            "TYPE": "MIDI Synth",
+            "ENABLED": True,
+            "custom": {"preserve": [1, 2]},
+        }
+    }
+    registry = root / "config/engine_config.json"
+    registry.write_text(json.dumps(original_registry))
+    (root / "zynthian-sys/config/engine_config.json").write_text("{}")
+    instrument = root / "zynthian-my-data/soundfonts/test/Piano/existing.npno"
+    instrument.write_bytes(b"preserve")
+    install_manifest_data["instruments"] = {
+        "base_path": "/zynthian/zynthian-my-data/soundfonts/test",
+        "directories": ["Piano", "Strings"],
+    }
+    manifest = parse_manifest(
+        install_manifest_data, "zynthian-workstation/test", "1.0.0"
+    )
+    spec = asdict(manifest)
+    job = tmp_path / "job"
+    job.mkdir()
+    package = job / "package"
+    header = bytearray(64)
+    header[:6] = b"\x7fELF\x02\x01"
+    header[16:18] = (3).to_bytes(2, "little")
+    header[18:20] = (183).to_bytes(2, "little")
+    with tarfile.open(package, "w:gz") as output:
+        for name, data in [("manifest.ttl", b"fixture"), ("test.so", bytes(header))]:
+            item = tarfile.TarInfo("Test.lv2/" + name)
+            item.size = len(data)
+            output.addfile(item, io.BytesIO(data))
+    spec["sha256"] = remote["package_digest"](package)
+    monkeypatch.setattr(remote["platform"], "machine", lambda: "aarch64")
+    monkeypatch.setattr(remote["subprocess"], "run", Mock())
+    monkeypatch.setattr(
+        remote["shutil"], "disk_usage", lambda p: types.SimpleNamespace(free=10**12)
+    )
+    world = Mock()
+    world.get_name.return_value = "Test"
+    world.get_uri.return_value = spec["identity"]["plugin_uri"]
+    world.get_all_plugins.return_value = [world]
+    world.get_class.return_value = types.SimpleNamespace(
+        get_label=lambda: "Instrument Plugin"
+    )
+    world.get_data_uris.return_value = []
+    world.get_value.return_value = ["fixture description"]
+    remote["MetadataWorld"] = Mock(return_value=world)
+    remote["discover_presets"] = Mock(return_value=("Test", {}))
+
+    def inventory(root):
+        plugins = []
+        if (root / "zynthian-plugins/lv2/Test.lv2").exists():
+            plugins.append(
+                dict(
+                    uri=spec["identity"]["plugin_uri"],
+                    bundle="Test.lv2",
+                    package_version="1.0.0",
+                    package_repository=manifest.identity.repository,
+                )
+            )
+        records = json.loads(registry.read_text())
+        return dict(
+            plugins=plugins,
+            registered_uris=[r["URL"] for r in records.values()],
+            incomplete_bundles=[],
+        )
+
+    def run(**kwargs):
+        return remote["install_transaction"](
+            spec,
+            package,
+            job,
+            root,
+            kwargs.get("inspect", inventory),
+            kwargs.get("restart", Mock()),
+        )
+
+    return types.SimpleNamespace(
+        root=root,
+        source=source,
+        registry=registry,
+        run=run,
+        spec=spec,
+        job=job,
+        instrument=instrument,
+        original_registry=original_registry,
+        inventory=inventory,
+    )
+
+
+def test_install_register_enable_and_preserve(remote, transaction):
+    result = transaction.run()
+    assert result["success"], result
+    registry = json.loads(transaction.registry.read_text())
+    assert registry["OTHER"] == transaction.original_registry["OTHER"]
+    assert registry["JV/Test"]["CAT"] == "Workstation"
+    assert registry["JV/Test"]["TYPE"] == "MIDI Synth"
+    assert registry["JV/Test"]["ENABLED"] is True
+    assert transaction.instrument.read_bytes() == b"preserve"
+    assert (transaction.instrument.parents[1] / "Strings").is_dir()
+    assert transaction.source.read_text().count('"Workstation"') == 1
+
+
+@pytest.mark.parametrize(
+    "point",
+    [
+        "architecture",
+        "checksum",
+        "existing_bundle",
+        "existing_uri",
+        "category_structure",
+        "engine_profile",
+        "extract",
+        "uri",
+        "version",
+        "name",
+        "registration",
+        "presets",
+        "restart",
+        "final_inventory",
+    ],
+)
+def test_failures_restore_previous_state(remote, transaction, point, monkeypatch):
+    before_source = transaction.source.read_bytes()
+    before_registry = transaction.registry.read_bytes()
+    bundle = transaction.root / "zynthian-plugins/lv2/Test.lv2"
+    restart = Mock()
+    inventory = transaction.inventory
+    if point == "architecture":
+        monkeypatch.setattr(remote["platform"], "machine", lambda: "x86_64")
+    elif point == "checksum":
+        transaction.spec["sha256"] = "0" * 64
+    elif point == "existing_bundle":
+        bundle.mkdir()
+        (bundle / "keep").write_bytes(b"keep")
+    elif point == "existing_uri":
+        document = json.loads(before_registry)
+        document["existing"] = {"URL": transaction.spec["identity"]["plugin_uri"]}
+        transaction.registry.write_text(json.dumps(document))
+        before_registry = transaction.registry.read_bytes()
+    elif point == "category_structure":
+        transaction.source.write_text(
+            before_source.decode().replace("Acoustic", "Unsupported")
+        )
+        before_source = transaction.source.read_bytes()
+    elif point == "engine_profile":
+        transaction.source.write_text(
+            before_source.decode().replace(
+                "def get_engines():", "def get_engines_unknown():"
+            )
+        )
+        before_source = transaction.source.read_bytes()
+    elif point == "extract":
+        remote["extract_package"] = Mock(side_effect=ValueError("corrupt"))
+    elif point in ("uri", "version", "final_inventory"):
+        calls = []
+
+        def inventory(root):
+            result = transaction.inventory(root)
+            calls.append(1)
+            if bundle.exists():
+                if point == "uri" or point == "final_inventory" and len(calls) == 4:
+                    result["plugins"] = []
+                elif point == "version":
+                    result["plugins"][0]["package_version"] = "9.0.0"
+            return result
+    elif point == "name":
+        remote["MetadataWorld"].return_value.get_name.return_value = "Other"
+    elif point == "presets":
+        remote["discover_presets"] = Mock(side_effect=ValueError("presets"))
+    elif point == "registration":
+        remote["configure"] = Mock(side_effect=ValueError("registration"))
+    elif point == "restart":
+        restart.side_effect = [TimeoutError("restart"), None]
+    result = transaction.run(restart=restart, inspect=inventory)
+    assert not result["success"], result
+    assert not result["partial"], result
+    assert transaction.source.read_bytes() == before_source
+    assert transaction.registry.read_bytes() == before_registry
+    assert transaction.instrument.read_bytes() == b"preserve"
+    assert not (transaction.instrument.parents[1] / "Strings").exists()
+    if point == "existing_bundle":
+        assert (bundle / "keep").read_bytes() == b"keep"
+    else:
+        assert not bundle.exists()
+
+
+def test_partial_rollback_preserves_recovery(remote, transaction):
+    result = transaction.run(restart=Mock(side_effect=TimeoutError("service")))
+    assert not result["success"]
+    assert result["partial"]
+    assert "Rollback parcial" in result["message"]
+    assert transaction.job.exists()
+
+
+def test_category_idempotent(remote):
+    original = Path("tests/fixtures/engines/oram.txt").read_text()
+    updated = remote["category_candidate"](original)
+    assert remote["category_candidate"](updated) == updated
+    assert updated.count('"Workstation"') == 1
+
+
+@pytest.mark.parametrize("profile", ["oram", "vangelis"])
+def test_audited_registration_profiles(remote, transaction, profile):
+    transaction.source.write_text(
+        Path(f"tests/fixtures/engines/{profile}.txt").read_text()
+    )
+    result = transaction.run()
+    assert result["success"], result
+
+
+def test_symlink_instruments_blocked(remote, transaction, tmp_path):
+    destination = transaction.instrument.parents[1] / "Strings"
+    destination.symlink_to(tmp_path, target_is_directory=True)
+    result = transaction.run()
+    assert not result["success"]
+    assert not result["partial"]
+    assert destination.is_symlink()
+
+
+def test_concurrent_registry_writer_is_preserved(remote, transaction):
+    def concurrent_restart():
+        document = json.loads(transaction.registry.read_text())
+        document["other-new"] = {"URL": "urn:another"}
+        transaction.registry.write_text(json.dumps(document))
+        raise RuntimeError("concurrent writer")
+
+    result = transaction.run(restart=concurrent_restart)
+    assert result["partial"]
+    assert "other-new" in json.loads(transaction.registry.read_text())
+    assert '"Workstation"' in transaction.source.read_text()
+
+
+def test_existing_preset_cache_preserved(remote, transaction):
+    cache = transaction.root / "config/jalv/presets_Test.json"
+    cache.parent.mkdir()
+    cache.write_bytes(b"user cache")
+    result = transaction.run()
+    assert not result["success"]
+    assert not result["partial"], result
+    assert cache.read_bytes() == b"user cache"
+
+
+def test_service_polling_until_running(remote, monkeypatch):
+    responses = [
+        Mock(),
+        Mock(stdout="ActiveState=activating\nSubState=start\nMainPID=0"),
+        Mock(stdout="ActiveState=active\nSubState=running\nMainPID=123"),
+    ]
+    runner = Mock(side_effect=responses)
+    monkeypatch.setattr(remote["subprocess"], "run", runner)
+    monkeypatch.setattr(remote["time"], "sleep", Mock())
+    remote["restart_interface"]()
+    assert runner.call_count == 3
+
+
+def test_service_poll_timeout(remote, monkeypatch):
+    monkeypatch.setattr(remote["subprocess"], "run", Mock())
+    monkeypatch.setattr(remote["time"], "monotonic", Mock(side_effect=[0, 91]))
+    with pytest.raises(ValueError, match="Timeout"):
+        remote["restart_interface"]()
+
+
+def test_existing_category_is_unchanged(remote, transaction):
+    transaction.source.write_text(
+        remote["category_candidate"](transaction.source.read_text())
+    )
+    original = transaction.source.read_bytes()
+    result = transaction.run()
+    assert result["success"], result
+    assert transaction.source.read_bytes() == original
+
+
+def test_insufficient_space_is_read_only(remote, transaction, monkeypatch):
+    monkeypatch.setattr(
+        remote["shutil"],
+        "disk_usage",
+        lambda path: types.SimpleNamespace(free=1),
+    )
+    original = transaction.registry.read_bytes()
+    result = transaction.run()
+    assert not result["success"]
+    assert not result["partial"]
+    assert transaction.registry.read_bytes() == original
+
+
+def test_new_instruments_not_removed_if_user_fills_directory(remote, transaction):
+    created = transaction.instrument.parents[1] / "Strings"
+
+    def fail():
+        (created / "new-user-instrument").write_bytes(b"preserve")
+        raise RuntimeError("service")
+
+    result = transaction.run(restart=fail)
+    assert not result["success"]
+    assert result["partial"]
+    assert (created / "new-user-instrument").read_bytes() == b"preserve"
+    assert transaction.instrument.read_bytes() == b"preserve"
+
+
+def test_unrelated_shared_directory_symlinks_do_not_block_install(remote, transaction):
+    unrelated = transaction.root / "config/unrelated-link"
+    unrelated.symlink_to("/etc/hostname")
+    result = transaction.run()
+    assert result["success"], result
+    assert unrelated.is_symlink()
+
+
+def test_transaction_target_ancestor_symlink_is_blocked(remote, transaction, tmp_path):
+    plugins = transaction.root / "zynthian-plugins/lv2"
+    plugins.rmdir()
+    plugins.symlink_to(tmp_path, target_is_directory=True)
+    result = transaction.run()
+    assert not result["success"]
+    assert not result["partial"]
+    assert plugins.is_symlink()
+
+
+@pytest.fixture
+def nord_transaction(transaction, remote):
+    root = transaction.root
+    identity = transaction.spec["identity"]
+    identity.update(
+        repository="zynthian-workstation/nord",
+        plugin_uri="urn:nord:instrument",
+        bundle="Nord.lv2",
+        display_name="Nord",
+    )
+    transaction.spec["integration_components"] = (
+        "engine-registration",
+        "dynamic-parameter-pages",
+    )
+    transaction.spec["instrument_base"] = "/zynthian/zynthian-my-data/soundfonts/nord"
+    source = root / "zynthian-ui/zyngine"
+    for filename, fixture in [
+        ("zynthian_engine_jalv.py", "jalv.txt"),
+        ("zynthian_processor.py", "processor.txt"),
+    ]:
+        (source / filename).write_bytes(
+            (Path("tests/fixtures/nord-integration") / fixture).read_bytes()
+        )
+    transaction.ui_originals = {p: p.read_bytes() for p in source.glob("*.py")}
+    existing = root / "zynthian-my-data/soundfonts/nord/Piano/existing.npno"
+    existing.parent.mkdir(parents=True)
+    existing.write_bytes(b"preserve-nord")
+    transaction.nord_instrument = existing
+    entries = [("piano", "npno"), ("sample", "nsmp4"), ("pure", "pure")]
+    catalog = "NORD-LIBRARY-2\0" + "".join(
+        "\0".join((key, key, key, "Category", "Category", fmt, "-")) + "\0"
+        for key, fmt in entries
+    )
+    layout = (
+        "7\tgeneral\tGeneral\t0\tgain\t0\n"
+        "6\tfilter\tFilter\t0\tcutoff\t0\n"
+        "4\tfx\tFX\t0\treverb\t0\n"
+    )
+    header = bytearray(64)
+    header[:6] = b"\x7fELF\x02\x01"
+    header[16:18] = (3).to_bytes(2, "little")
+    header[18:20] = (183).to_bytes(2, "little")
+    package = transaction.job / "package"
+    contents = {
+        "manifest.ttl": b"fixture",
+        "test.so": bytes(header),
+        "catalog.nord": catalog.encode(),
+        "tools/control-layout.tsv": layout.encode(),
+        "tools/untrusted_payload.py": b'raise RuntimeError("must not run")\n',
+    }
+    with tarfile.open(package, "w:gz") as output:
+        for name, data in contents.items():
+            info = tarfile.TarInfo("Nord.lv2/" + name)
+            info.size = len(data)
+            output.addfile(info, io.BytesIO(data))
+    transaction.spec["sha256"] = remote["package_digest"](package)
+    world = remote["MetadataWorld"].return_value
+    world.get_name.return_value = "Nord"
+    world.get_uri.return_value = identity["plugin_uri"]
+    world.P = remote["C"].c_void_p
+    symbols = ("gain", "cutoff", "reverb")
+
+    def api(name, *args):
+        if name == "lilv_plugin_get_num_ports":
+            return lambda plugin: len(symbols)
+        if name == "lilv_plugin_get_port_by_index":
+            return lambda plugin, index: index
+        if name == "lilv_port_get_symbol":
+            return lambda plugin, port: symbols[port]
+        raise AssertionError(name)
+
+    world.api.side_effect = api
+    world.string.side_effect = lambda symbol: symbol
+    remote["discover_presets"].return_value = ("Nord", {})
+    registry = transaction.registry
+
+    def inventory(root):
+        plugins = []
+        if (root / "zynthian-plugins/lv2/Nord.lv2").exists():
+            plugins.append(
+                dict(
+                    uri="urn:nord:instrument",
+                    bundle="Nord.lv2",
+                    package_version="1.0.0",
+                    package_repository=identity["repository"],
+                )
+            )
+        return dict(
+            plugins=plugins,
+            registered_uris=[
+                v["URL"] for v in json.loads(registry.read_text()).values()
+            ],
+            incomplete_bundles=[],
+        )
+
+    def run(**kwargs):
+        return remote["install_transaction"](
+            transaction.spec,
+            package,
+            transaction.job,
+            root,
+            kwargs.get("inspect", inventory),
+            kwargs.get("restart", Mock()),
+        )
+
+    transaction.run = run
+    transaction.inventory = inventory
+    transaction.nord_bundle = root / "zynthian-plugins/lv2/Nord.lv2"
+    transaction.ui_directory = source
+    return transaction
+
+
+def assert_nord_restored(transaction):
+    for path, original in transaction.ui_originals.items():
+        assert path.read_bytes() == original
+    assert not (transaction.ui_directory / "nord_host.py").exists()
+    assert not (transaction.ui_directory / "nord_pages.py").exists()
+    assert not transaction.nord_bundle.exists()
+    assert transaction.nord_instrument.read_bytes() == b"preserve-nord"
+    assert json.loads(transaction.registry.read_text()) == transaction.original_registry
+
+
+def test_dynamic_pages_are_installed_and_verified_with_persistent_backups(
+    remote, nord_transaction
+):
+    transaction = nord_transaction
+    checkpoints = []
+
+    def restart():
+        assert (
+            "from .nord_host import screens"
+            in (transaction.ui_directory / "zynthian_processor.py").read_text()
+        )
+        assert (transaction.ui_directory / "nord_host.py").exists()
+        checkpoints.append(True)
+
+    result = transaction.run(restart=restart)
+    assert result["success"], result
+    assert checkpoints
+    for name, expected in remote["NORD_UI_ASSETS"].items():
+        assert (transaction.ui_directory / name).read_bytes() == expected
+    assert (
+        b"raise RuntimeError"
+        in (transaction.nord_bundle / "tools/untrusted_payload.py").read_bytes()
+    )
+    assert transaction.nord_instrument.read_bytes() == b"preserve-nord"
+    backup_root = transaction.root / "config/workstation-manager/integration-backups"
+    manifests = list(backup_root.glob("*/manifest.json"))
+    assert len(manifests) == 1
+    records = json.loads(manifests[0].read_text())
+    assert len(records) == 4
+    for record in records:
+        if record["old"]:
+            assert (
+                manifests[0].parent / record["old"]
+            ).read_bytes() == transaction.ui_originals[Path(record["path"])]
+    journal = json.loads((transaction.job / "transaction.json").read_text())
+    assert journal["integrations"][0]["backup"] == str(manifests[0].parent)
+    assert "Backup da integração" in result["message"]
+
+
+@pytest.mark.parametrize("write_number", [1, 2, 3, 4])
+def test_ui_write_failure_rolls_back_entire_install(
+    remote, nord_transaction, write_number
+):
+    original_apply = remote["NordDynamicPages"].apply
+
+    def failing_apply(self, checkpoint):
+        atomic = self.setup["atomic"]
+        count = 0
+
+        def failing_atomic(*args):
+            nonlocal count
+            count += 1
+            atomic(*args)
+            if count == write_number:
+                raise OSError("injected after atomic replace")
+
+        self.setup["atomic"] = failing_atomic
+        return original_apply(self, checkpoint)
+
+    remote["NordDynamicPages"].apply = failing_apply
+    result = nord_transaction.run()
+    assert not result["success"]
+    assert not result["partial"], result
+    assert_nord_restored(nord_transaction)
+    assert not (nord_transaction.root / "config/workstation-manager").exists()
+
+
+@pytest.mark.parametrize("failure", ["presets", "restart", "final-ui-verification"])
+def test_later_failure_reverts_ui_and_lv2(remote, nord_transaction, failure):
+    restart = Mock()
+    if failure == "presets":
+        remote["discover_presets"].side_effect = RuntimeError("preset failure")
+    elif failure == "restart":
+        restart.side_effect = [TimeoutError("restart failure"), None]
+    else:
+        original = remote["NordDynamicPages"].verify
+        count = 0
+
+        def verify(self):
+            nonlocal count
+            count += 1
+            if count == 2:
+                raise ValueError("UI verification failed")
+            return original(self)
+
+        remote["NordDynamicPages"].verify = verify
+    result = nord_transaction.run(restart=restart)
+    assert not result["success"]
+    assert not result["partial"], result
+    assert_nord_restored(nord_transaction)
+
+
+@pytest.mark.parametrize(
+    "case", ["unknown-host", "modified-hook", "foreign-module", "symlink"]
+)
+def test_incompatible_ui_is_refused_before_plugin_or_category_changes(
+    remote, nord_transaction, case, tmp_path
+):
+    directory = nord_transaction.ui_directory
+    if case == "unknown-host":
+        path = directory / "zynthian_processor.py"
+        path.write_text(
+            path.read_text().replace(
+                "def get_ctrl_screens(self):", "def unknown_ctrl_screens(self):"
+            )
+        )
+    elif case == "modified-hook":
+        path = directory / "zynthian_processor.py"
+        path.write_text(path.read_text() + "\n# NORD view hook modified\n")
+    elif case == "foreign-module":
+        (directory / "nord_host.py").write_text(
+            "# Nord managed controller integration v1\nCUSTOM=True\n"
+        )
+    else:
+        (directory / "nord_host.py").symlink_to(tmp_path / "unrelated")
+    before = {p: p.read_bytes() for p in directory.glob("*.py") if not p.is_symlink()}
+    result = nord_transaction.run()
+    assert not result["success"]
+    assert not result["partial"], result
+    assert not nord_transaction.nord_bundle.exists()
+    for path, old in before.items():
+        assert path.read_bytes() == old
+
+
+def test_existing_integration_is_idempotent_and_not_removed_by_rollback(
+    remote, nord_transaction
+):
+    transaction = nord_transaction
+    first = remote["prepare_dynamic_pages"](
+        transaction.spec, transaction.root, transaction.job
+    )
+    first.apply(lambda: None)
+    before = {p: p.read_bytes() for p in transaction.ui_directory.glob("*.py")}
+    existing_backups = list(
+        (transaction.root / "config/workstation-manager/integration-backups").iterdir()
+    )
+    import shutil
+
+    shutil.rmtree(transaction.job / "manager-ui-assets")
+    result = transaction.run(restart=Mock(side_effect=[TimeoutError("service"), None]))
+    assert not result["success"] and not result["partial"], result
+    assert before == {p: p.read_bytes() for p in before}
+    assert (
+        list(
+            (
+                transaction.root / "config/workstation-manager/integration-backups"
+            ).iterdir()
+        )
+        == existing_backups
+    )
+
+
+def test_concurrent_hook_edit_reports_partial_and_preserves_required_modules(
+    remote, nord_transaction
+):
+    transaction = nord_transaction
+    hook = transaction.ui_directory / "zynthian_processor.py"
+
+    def external_edit():
+        hook.write_text(hook.read_text() + "\nCUSTOM=True\n")
+        raise RuntimeError("external change")
+
+    result = transaction.run(restart=external_edit)
+    assert not result["success"] and result["partial"]
+    assert "CUSTOM=True" in hook.read_text()
+    assert (transaction.ui_directory / "nord_host.py").exists()
+    assert (transaction.ui_directory / "nord_pages.py").exists()
+    assert "Hooks ainda referenciam" in result["message"]
+    assert list(
+        (transaction.root / "config/workstation-manager/integration-backups").glob(
+            "*/manifest.json"
+        )
+    )
+
+
+@pytest.mark.parametrize("metadata", ["layout", "catalog", "symbols"])
+def test_dynamic_metadata_failure_prevents_any_live_mutation(
+    remote, nord_transaction, metadata
+):
+    original = remote["NordDynamicPages"].validate_bundle
+
+    def corrupt(self, bundle):
+        if metadata == "layout":
+            (bundle / "tools/control-layout.tsv").write_text("invalid")
+        elif metadata == "catalog":
+            (bundle / "catalog.nord").write_text("corrupt")
+        else:
+            (bundle / "tools/control-layout.tsv").write_text(
+                "7\tx\tX\t0\tunknown_port\t0\n"
+            )
+        return original(self, bundle)
+
+    remote["NordDynamicPages"].validate_bundle = corrupt
+    result = nord_transaction.run()
+    assert not result["success"] and not result["partial"], result
+    assert_nord_restored(nord_transaction)
+
+
+def test_original_upstream_modules_are_preserved(remote, nord_transaction):
+    transaction = nord_transaction
+    for name in ("nord_host.py", "nord_pages.py"):
+        (transaction.ui_directory / name).write_bytes(
+            (Path("tests/fixtures/nord-integration") / (name + ".txt")).read_bytes()
+        )
+    result = transaction.run()
+    assert result["success"], result
+    for name in ("nord_host.py", "nord_pages.py"):
+        assert (transaction.ui_directory / name).read_bytes() == (
+            Path("tests/fixtures/nord-integration") / (name + ".txt")
+        ).read_bytes()
+
+
+def test_install_command_compression_preserves_exact_audited_sources():
+    import ast
+    import base64
+    import shlex
+    import zlib
+
+    from workstation_manager.infrastructure.installation import install_command
+
+    spec = {"identity": {"repository": "zynthian-workstation/nord"}}
+    command = install_command(spec, "/tmp/package", "/tmp/job")
+    tree = ast.parse(shlex.split(command)[3])
+    encoded = next(
+        node.args[0].value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "b64decode"
+    )
+    decoded = zlib.decompress(base64.b64decode(encoded)).decode()
+    assert decoded == installation_source(spec, "/tmp/package", "/tmp/job")
+    assert len(command.encode()) < 65536
+
+
+def test_dynamic_rules_change_visible_controls_without_losing_values(
+    remote, nord_transaction, monkeypatch
+):
+    import sys
+    import types
+
+    transaction = nord_transaction
+    result = transaction.run()
+    assert result["success"], result
+    package = types.ModuleType("manager_nord_test")
+    package.__path__ = []
+    monkeypatch.setitem(sys.modules, "manager_nord_test", package)
+    pages = types.ModuleType("manager_nord_test.nord_pages")
+    exec(
+        compile(remote["NORD_UI_ASSETS"]["nord_pages.py"], "<pages>", "exec"),
+        pages.__dict__,
+    )
+    monkeypatch.setitem(sys.modules, pages.__name__, pages)
+    host = types.ModuleType("manager_nord_test.nord_host")
+    host.__package__ = package.__name__
+    exec(
+        compile(remote["NORD_UI_ASSETS"]["nord_host.py"], "<host>", "exec"),
+        host.__dict__,
+    )
+    document = transaction.nord_bundle / "state.ttl"
+    document.write_text("fixture")
+    host.host_context = lambda engine, uri: (
+        transaction.nord_bundle,
+        transaction.nord_bundle / "catalog.nord",
+        document,
+    )
+    host.preset_identity = lambda uri, path: uri.rsplit(":", 1)[-1]
+    controls = {
+        name: types.SimpleNamespace(
+            symbol=name, value=index, midi_binding=("keep", name)
+        )
+        for index, name in enumerate(("gain", "cutoff", "reverb"))
+    }
+    processor = types.SimpleNamespace(
+        engine=types.SimpleNamespace(
+            plugin_url="urn:nord:instrument",
+            state_manager=types.SimpleNamespace(send_cuia=Mock()),
+        ),
+        ctrl_screens_dict={},
+        current_screen_index=0,
+        controllers_dict=controls,
+        build_ctrl_screen=lambda names: [controls[name] for name in names],
+    )
+    original = dict(controls)
+    for identity, expected in [
+        ("piano", ["gain"]),
+        ("sample", ["gain", "cutoff"]),
+        ("pure", ["gain", "cutoff", "reverb"]),
+    ]:
+        host.preset_changed(processor, ["urn:preset:" + identity])
+        screens = host.screens(processor)
+        assert [
+            control.symbol for page in screens.values() for control in page
+        ] == expected
+        for name, control in controls.items():
+            assert control is original[name]
+            assert control.midi_binding == ("keep", name)
+            assert control.value == list(controls).index(name)
+    processor.engine.plugin_url = "urn:other"
+    before = processor.ctrl_screens_dict
+    assert host.screens(processor) is before
+
+
+@pytest.mark.parametrize("canonical", [False, True])
+def test_real_lilv_metadata_validates_dynamic_layout_symbols(
+    remote, tmp_path, canonical
+):
+    root = tmp_path / "zynthian"
+    directory = root / "zynthian-ui/zyngine"
+    directory.mkdir(parents=True)
+    for name, fixture in [
+        ("zynthian_engine_jalv.py", "jalv.txt"),
+        ("zynthian_processor.py", "processor.txt"),
+    ]:
+        (directory / name).write_bytes(
+            (Path("tests/fixtures/nord-integration") / fixture).read_bytes()
+        )
+    job = tmp_path / "job"
+    job.mkdir()
+    spec = dict(
+        identity=dict(
+            repository="zynthian-workstation/nord",
+            plugin_uri="urn:nord:instrument",
+            bundle="Nord.lv2",
+        ),
+        integration_components=["dynamic-parameter-pages"],
+    )
+    integration = remote["prepare_dynamic_pages"](spec, root, job)
+    remote["URI"] = "urn:nord:instrument"
+    bundle = tmp_path / "Nord.lv2"
+    (bundle / "tools").mkdir(parents=True)
+    (bundle / "manifest.ttl").write_text("""
+@prefix lv2: <http://lv2plug.in/ns/lv2core#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+<urn:nord:instrument> a lv2:Plugin ; lv2:binary <test.so> ; rdfs:seeAlso <plugin.ttl> .
+""")
+    (bundle / "plugin.ttl").write_text("""
+@prefix lv2: <http://lv2plug.in/ns/lv2core#> .
+@prefix doap: <http://usefulinc.com/ns/doap#> .
+<urn:nord:instrument> a lv2:InstrumentPlugin ; doap:name "Nord" ; lv2:binary <test.so> ;
+lv2:port [ a lv2:InputPort, lv2:ControlPort ; lv2:index 0 ;
+lv2:symbol "gain" ; lv2:name "Gain" ] .
+""")
+    (bundle / "test.so").write_bytes(b"\x7fELF" + bytes(60))
+    (bundle / "catalog.nord").write_bytes(
+        b"NORD-LIBRARY-2\0piano\0original\0name\0category\0display\0npno\0-\0"
+    )
+    layout = bundle / "tools/control-layout.tsv"
+    if canonical:
+        layout.write_bytes(
+            Path("tests/fixtures/nord-integration/control-layout.tsv").read_bytes()
+        )
+        symbols = [line.split("\t")[4] for line in layout.read_text().splitlines()]
+        assert len(symbols) == 125
+        ports = ",\n".join(
+            "[ a lv2:InputPort, lv2:ControlPort ; lv2:index "
+            + str(index)
+            + ' ; lv2:symbol "'
+            + symbol
+            + '" ; lv2:name "'
+            + symbol
+            + '" ]'
+            for index, symbol in enumerate(symbols)
+        )
+        (bundle / "plugin.ttl").write_text(
+            "@prefix lv2: <http://lv2plug.in/ns/lv2core#> .\n"
+            "@prefix doap: <http://usefulinc.com/ns/doap#> .\n"
+            '<urn:nord:instrument> a lv2:InstrumentPlugin ; doap:name "Nord" ; '
+            "lv2:binary <test.so> ; lv2:port " + ports + " .\n"
+        )
+    else:
+        layout.write_text("7\tgeneral\tGeneral\t0\tgain\t0\n")
+    integration.validate_bundle(bundle)
+    valid_layout = layout.read_text()
+    for invalid_index in (-1, 4096):
+        rows = valid_layout.splitlines()
+        columns = rows[0].split("\t")
+        columns[3] = str(invalid_index)
+        rows[0] = "\t".join(columns)
+        layout.write_text("\n".join(rows) + "\n")
+        with pytest.raises(RuntimeError, match="controles reais"):
+            integration.validate_bundle(bundle)
+    layout.write_text("7\tgeneral\tGeneral\t0\tmissing\t0\n")
+    with pytest.raises(RuntimeError, match="controles reais"):
+        integration.validate_bundle(bundle)
+
+
+def test_release_without_internal_index_is_recorded(remote, transaction):
+    result = transaction.run()
+    assert result["success"], result
+    bundle = transaction.root / "zynthian-plugins/lv2/Test.lv2"
+    metadata = json.loads((bundle / "workstation-release.json").read_text())
+    assert metadata["version"] == transaction.spec["version"]
+    assert metadata["repository"] == transaction.spec["identity"]["repository"]
+    assert metadata["provenance"]["asset_sha256"] == transaction.spec["sha256"]
+    assert metadata["files"]["test.so"] == remote["package_digest"](bundle / "test.so")
+    assert (
+        remote["verify_package"](
+            bundle,
+            transaction.spec["identity"]["plugin_uri"],
+            (bundle / "test.so").resolve(),
+            [(bundle / "manifest.ttl").resolve()],
+            "aarch64",
+        )[0]
+        == "1.0.0"
+    )
+    (bundle / "test.so").write_bytes(b"corrupted")
+    with pytest.raises(ValueError, match="checksum"):
+        remote["verify_package"](
+            bundle,
+            transaction.spec["identity"]["plugin_uri"],
+            (bundle / "test.so").resolve(),
+            [],
+            "aarch64",
+        )
+
+
+@pytest.mark.parametrize("content", [b"invalid json", b'{"version":"9.0.0"}'])
+def test_existing_publisher_index_is_never_repaired(remote, tmp_path, content):
+    bundle = tmp_path / "Test.lv2"
+    bundle.mkdir()
+    index = bundle / "workstation-release.json"
+    index.write_bytes(content)
+    remote["record_package_release"](bundle, {})
+    assert index.read_bytes() == content
+
+
+def test_generated_index_passes_real_lilv_inventory(remote, tmp_path, monkeypatch):
+    root = tmp_path / "zynthian"
+    bundle = root / "zynthian-plugins/lv2/Test.lv2"
+    bundle.mkdir(parents=True)
+    (bundle / "manifest.ttl").write_text("""
+@prefix lv2: <http://lv2plug.in/ns/lv2core#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+<urn:test:instrument> a lv2:Plugin ; lv2:binary <test.so> ;
+rdfs:seeAlso <plugin.ttl> .
+""")
+    (bundle / "plugin.ttl").write_text("""
+@prefix lv2: <http://lv2plug.in/ns/lv2core#> .
+@prefix doap: <http://usefulinc.com/ns/doap#> .
+<urn:test:instrument> a lv2:InstrumentPlugin ; doap:name "Test" ;
+lv2:binary <test.so> .
+""")
+    (bundle / "test.so").write_bytes(b"\x7fELF" + bytes(60))
+    spec = dict(
+        identity=dict(
+            repository="zynthian-workstation/test",
+            plugin_uri="urn:test:instrument",
+            bundle="Test.lv2",
+        ),
+        version="1.0.0",
+        sha256="a" * 64,
+    )
+    monkeypatch.setattr(remote["platform"], "machine", lambda: "aarch64")
+    remote["record_package_release"](bundle, spec)
+    inventory = remote["inventory"](root)
+    assert inventory["incomplete_bundles"] == []
+    assert inventory["plugins"][0]["package_version"] == "1.0.0"
+    assert inventory["plugins"][0]["uri"] == "urn:test:instrument"
+    (bundle / "plugin.ttl").write_text((bundle / "plugin.ttl").read_text() + "\n")
+    assert "Test.lv2" in remote["inventory"](root)["incomplete_bundles"]
+
+
+@pytest.mark.parametrize("failure", [None, "restart", "after_write"])
+def test_existing_valid_preset_cache_merged_transactionally(
+    remote, transaction, failure
+):
+    cache = transaction.root / "config/jalv/presets_Test.json"
+    cache.parent.mkdir()
+    previous = {
+        "User": {
+            "bank_url": "urn:bank:user",
+            "custom": "keep",
+            "presets": [
+                {"url": "urn:preset:user", "label": "My sound", "custom": [1, 2]}
+            ],
+        }
+    }
+    original = json.dumps(previous, indent=3).encode()
+    cache.write_bytes(original)
+    cache.chmod(0o640)
+    remote["discover_presets"].return_value = (
+        "Test",
+        {
+            "User": {
+                "bank_url": "urn:bank:user",
+                "presets": [
+                    {"url": "urn:preset:user", "label": "Different label"},
+                    {"url": "urn:preset:new", "label": "New sound"},
+                ],
+            }
+        },
+    )
+    kwargs = {}
+    if failure == "restart":
+        kwargs["restart"] = Mock(side_effect=[RuntimeError("restart"), None])
+    if failure == "after_write":
+        atomic = remote["atomic_write"]
+        failed = False
+
+        def fail_after_write(path, *args):
+            nonlocal failed
+            atomic(path, *args)
+            if path == cache and not failed:
+                failed = True
+                raise RuntimeError("after cache write")
+
+        remote["atomic_write"] = fail_after_write
+    result = transaction.run(**kwargs)
+    if failure:
+        assert not result["success"]
+        assert not result["partial"], result
+        assert cache.read_bytes() == original
+    else:
+        assert result["success"], result
+        result_cache = json.loads(cache.read_text())
+        assert result_cache["User"]["custom"] == "keep"
+        assert result_cache["User"]["presets"][0] == previous["User"]["presets"][0]
+        assert [p["url"] for p in result_cache["User"]["presets"]] == [
+            "urn:preset:user",
+            "urn:preset:new",
+        ]
+    assert cache.stat().st_mode & 0o777 == 0o640
+
+
+def test_unchanged_existing_cache_is_preserved_byte_for_byte(remote, transaction):
+    cache = transaction.root / "config/jalv/presets_Test.json"
+    cache.parent.mkdir()
+    cache.write_bytes(b'{\n "User": {"bank_url": null, "presets": []}\n}\n')
+    original = cache.read_bytes()
+    result = transaction.run()
+    assert result["success"], result
+    assert cache.read_bytes() == original
+
+
+def test_conflicting_bank_is_preserved_and_reported(remote, transaction):
+    cache = transaction.root / "config/jalv/presets_Test.json"
+    cache.parent.mkdir()
+    cache.write_text('{"Bank":{"bank_url":"urn:old", "presets":[]}}')
+    original = cache.read_bytes()
+    remote["discover_presets"].return_value = (
+        "Test",
+        {"Bank": {"bank_url": "urn:other", "presets": []}},
+    )
+    result = transaction.run()
+    assert not result["success"]
+    assert not result["partial"], result
+    assert "conflitante" in result["message"]
+    assert cache.read_bytes() == original
+
+
+def test_concurrent_cache_edit_preserved_on_rollback(remote, transaction):
+    cache = transaction.root / "config/jalv/presets_Test.json"
+    cache.parent.mkdir()
+    cache.write_bytes(b"{}")
+    remote["discover_presets"].return_value = (
+        "Test",
+        {"Bank": {"bank_url": None, "presets": []}},
+    )
+
+    def restart():
+        cache.write_bytes(b'{"external":"preserve"}')
+        raise RuntimeError("restart")
+
+    result = transaction.run(restart=restart)
+    assert not result["success"]
+    assert result["partial"]
+    assert cache.read_bytes() == b'{"external":"preserve"}'
+
+
+@pytest.mark.parametrize("collision", [False, True])
+def test_preset_discovery_rejects_other_engine_with_same_cache_name(
+    remote, tmp_path, monkeypatch, collision
+):
+    import ast
+    import sys
+
+    plugin = Mock()
+    plugin.get_name.return_value = "Nord"
+    plugin.get_uri.return_value = "urn:nord:instrument"
+    other = Mock()
+    other.get_name.return_value = "Nord" if collision else "Other"
+    other.get_uri.return_value = "urn:other"
+
+    class Plugins(list):
+        def get_by_uri(self, uri):
+            return plugin
+
+    world = Mock()
+    world.get_all_plugins.return_value = Plugins([plugin, other])
+    monkeypatch.setitem(
+        sys.modules,
+        "lilv",
+        types.SimpleNamespace(World=lambda: world, Namespace=lambda *args: None),
+    )
+    source = """
+def sanitize_fname(name):
+    return name
+
+def _generate_plugin_presets_cache(plugin):
+    save_plugin_presets_cache(str(plugin.get_name()), {})
+"""
+    nodes = {node.name: node for node in ast.parse(source).body}
+    remote["audit"] = lambda config: {"nodes": nodes}
+    remote["URI"] = "urn:nord:instrument"
+    if collision:
+        with pytest.raises(RuntimeError, match="conflita com outra engine"):
+            remote["discover_presets"]({"engine_source": "fixture"}, tmp_path)
+    else:
+        assert remote["discover_presets"]({"engine_source": "fixture"}, tmp_path) == (
+            "Nord",
+            {},
+        )

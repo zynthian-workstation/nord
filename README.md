@@ -1,4 +1,4 @@
-# Nord LV2 1.0.0
+# Nord LV2 1.0.1
 
 > Uma releitura dos timbres do Nord, usando o Nord Stage 4 como inspiração.
 
@@ -57,7 +57,7 @@ cmake --build build --target package_source
 ```
 
 Em Linux ARM64 nativo, o pacote binário será
-`Nord-LV2-1.0.0-linux-aarch64.tar.gz`, contendo `Nord.lv2/` na raiz. Em x86-64,
+`Nord-LV2-1.0.1-linux-aarch64.tar.gz`, contendo `Nord.lv2/` na raiz. Em x86-64,
 o nome termina em `linux-x86_64`: esse binário não pode ser instalado no Pi.
 O pacote de fontes correspondente inclui as dependências recuperadas e suas
 licenças em `dependency-sources/`, permitindo reconstrução sem rede. O CMake
@@ -144,7 +144,7 @@ Use **Actions → Nord ARM64 Release → Run workflow** para validar sem publica
 O acionamento manual somente disponibiliza artefatos de CI. A publicação ocorre
 exclusivamente em push de tag SemVer sem prefixo, idêntica à versão do manifesto,
 após todas as verificações. A permissão de escrita fica restrita ao job de
-publicação. O pacote binário esperado é `Nord-LV2-1.0.0-linux-aarch64.tar.gz`.
+publicação. O pacote binário esperado é `Nord-LV2-1.0.1-linux-aarch64.tar.gz`.
 Nenhuma publicação ou instalação ocorre ao executar o CMake localmente.
 
 ## Zynthian Oram
@@ -200,3 +200,35 @@ A licença MIT de SCXT não substitui a GPL das bibliotecas SST.
 Ao distribuir binários, disponibilize o pacote de fontes correspondente gerado
 por `package_source`, incluindo os fontes das dependências fixadas e o build.
 Nenhum instrumento, banco proprietário ou preset de usuário é distribuído.
+
+## Instalação pelo Workstation Manager (1.0.1)
+
+A integração específica pertence ao Nord. `workstation.json` declara `preInstall`
+e `postInstall`, executando `tools/install_zynthian.py` incluído no próprio pacote.
+O build CMake copia os arquivos rastreados no Git e gera `workstation-release.json`
+com identidade, versão, arquitetura, hashes de todos os arquivos e executáveis
+auxiliares declarados. A tag 1.0.1 aciona o workflow ARM64 existente; o Git não
+compila nem inclui arquivos automaticamente sem essas regras do build.
+
+O Manager não precisa conter código do Nord: valida e transfere o pacote, fornece
+um contexto transacional, executa os hooks, registra a engine e controla o serviço.
+O preInstall valida a compatibilidade Oram, o catálogo e os 125 controles LV2.
+O postInstall aplica os três hooks e os dois módulos com backups privados em
+`/zynthian/config/nord-ui-backups/nord-ui-*`. Nenhum desses scripts realiza SSH,
+reinicia o serviço ou recria registros de outras engines.
+
+O protocolo acrescenta `--action check|apply|verify|rollback|verify-rollback` e a
+variável `WORKSTATION_INSTALL_CONTEXT` aponta para o JSON de contexto v1 do Manager.
+O inventário de rollback é gravado antes das escritas e pode ser lido por outro
+processo. O rollback remove hooks antes dos módulos, preserva arquivos anteriores
+e alterações concorrentes, e comunica restauração parcial. Backups compartilhados
+não são removidos pela desinstalação; recursos privados são declarados em `uninstall`.
+
+Esses scripts executam como o usuário SSH autorizado e não constituem uma sandbox.
+Somente pacotes confiáveis devem ser instalados. Hooks não devem ser executados
+manualmente contra o Zynthian para testar: os testes usam diretórios temporários.
+
+`tests/installation_lifecycle_test.py` cobre aplicação, compatibilidade,
+idempotência, símbolos reais Lilv, symlinks, falha após cada escrita, restauração
+entre processos e alterações concorrentes. As fixtures upstream e a referência
+histórica dos testes migrados ficam em `tests/fixtures/manager-migration/`.

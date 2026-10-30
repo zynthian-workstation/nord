@@ -2,6 +2,7 @@
 """Validate the public installation contract and a staged Linux LV2 bundle."""
 import argparse
 import ctypes
+import fnmatch
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -48,6 +49,9 @@ def manifest(root, tag=None):
         check(not any(ord(c) < 32 for c in d) and ':' not in d, 'malformed directory')
     check(m['integration'] == {'host':'zynthian-oram', 'required':True,
           'components':['engine-registration','dynamic-parameter-pages']}, 'Oram integration')
+    for field, stage in (("preInstall", "pre"), ("postInstall", "post")):
+        check(m[field] == {"command":["python3", "-B", "tools/install_zynthian.py", stage],
+                            "timeout":120}, "lifecycle hook " + field)
     engine = json.loads((root/'integrations/zynthian/engine.json').read_text())
     check(engine['URL'] == m['plugin']['uri'] and engine['CAT'] == m['category'], 'Oram registration')
     lock = json.loads((root/'dependencies.lock.json').read_text())
@@ -65,7 +69,8 @@ def bundle(root, path, arch):
         check(p.suffix.lower() not in ('.npno','.nsmp4','.wav','.aiff','.log','.cpp','.o','.a'), f'unexpected content: {p}')
         check(p.name not in ('instruments','build','__pycache__'), f'development/sample directory: {p}')
     required = ['manifest.ttl','Nord_dsp.ttl','Nord_ui.ttl','Nord_dsp.so','Nord_ui.so','catalog.nord',
-                'workstation.json','tools/nord_catalog','tools/nord_host.py','tools/nord_pages.py',
+                'workstation.json','workstation-release.json','tools/install_zynthian.py',
+                'tools/installation.py','tools/installation_recipe.json','tools/nord_catalog','tools/nord_host.py','tools/nord_pages.py',
                 'tools/configure_zynthian_nord_ui.py','tools/engine.json','tools/refresh_library.py',
                 'tools/assemble_bundle.py','tools/generate_presets.py','tools/control_layout.py',
                 'licenses/Nord-GPL3.txt','licenses/dependencies.lock.json']
@@ -74,7 +79,17 @@ def bundle(root, path, arch):
     check(json.loads((path/'workstation.json').read_text()) == m, 'bundled manifest differs')
     for f in ('nord_host.py','nord_pages.py','configure_zynthian_nord_ui.py','engine.json'):
         check((path/'tools'/f).read_bytes() == (root/'integrations/zynthian'/f).read_bytes(), 'Oram payload differs')
-    check(os.access(path/'tools/nord_catalog',os.X_OK), 'catalog must be executable')
+    import hashlib
+    index = json.loads((path/'workstation-release.json').read_text())
+    check(index['version'] == m['version'] and index['architecture'] == arch, 'release identity')
+    for name, digest in index['files'].items():
+        check(hashlib.sha256((path/name).read_bytes()).hexdigest() == digest, 'release hash: '+name)
+    check(set(index['files']) == {p.relative_to(path).as_posix() for p in path.rglob('*')
+          if p.is_file() and p.name != 'workstation-release.json'
+          and not any(fnmatch.fnmatch(p.name, pattern) for pattern in ('*.tmp*','*.stamp','.nord-refresh.lock'))}, 'complete release index')
+    for name in ('installation.py','installation_recipe.json','install_zynthian.py'):
+        check((path/'tools'/name).read_bytes() == (root/'integrations/zynthian'/name).read_bytes(), 'lifecycle payload differs')
+    check(os.access(path/'tools/nord_catalog' ,os.X_OK), 'catalog must be executable')
     expected_machine = {'aarch64':183, 'x86_64':62}[arch]
     for f in ('Nord_dsp.so','Nord_ui.so','tools/nord_catalog'):
         binary = path/f

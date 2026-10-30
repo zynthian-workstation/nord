@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(Nord VERSION 1.0.0 LANGUAGES C CXX)
+project(Nord VERSION 1.0.1 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Shared dependencies are supplied by the target OS, never by a development tree.
@@ -86,7 +86,10 @@ add_custom_target(nord_bundle ALL
     "${NORD_SOURCE_DIR}/tools/control_layout.py" "${NORD_SOURCE_DIR}/tools/refresh_library.py"
     "${NORD_SOURCE_DIR}/integrations/zynthian/nord_host.py" "${NORD_SOURCE_DIR}/integrations/zynthian/nord_pages.py"
     "${NORD_SOURCE_DIR}/integrations/zynthian/configure_zynthian_nord_ui.py"
-    "${NORD_SOURCE_DIR}/integrations/zynthian/engine.json" "${NORD_BUNDLE}/tools"
+    "${NORD_SOURCE_DIR}/integrations/zynthian/engine.json"
+    "${NORD_SOURCE_DIR}/integrations/zynthian/installation.py"
+    "${NORD_SOURCE_DIR}/integrations/zynthian/installation_recipe.json"
+    "${NORD_SOURCE_DIR}/integrations/zynthian/install_zynthian.py" "${NORD_BUNDLE}/tools"
   DEPENDS nord_catalog Nord-lv2 Nord-lv2-ui
   VERBATIM)
 set(NORD_LICENSE_FILES
@@ -114,6 +117,8 @@ add_custom_command(TARGET nord_bundle POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different "${NORD_SOURCE_DIR}/README.md" "${NORD_BUNDLE}/licenses/THIRD-PARTY-NOTICES.md"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different "${NORD_SOURCE_DIR}/dependencies.lock.json" "${NORD_BUNDLE}/licenses/dependencies.lock.json"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different "${NORD_SOURCE_DIR}/workstation.json" "${NORD_BUNDLE}/workstation.json"
+  COMMAND ${Python3_EXECUTABLE} -B "${NORD_SOURCE_DIR}/tools/package_release.py"
+    --bundle "${NORD_BUNDLE}" --architecture "${CMAKE_SYSTEM_PROCESSOR}"
   VERBATIM)
 include(CTest)
 if(BUILD_TESTING)
